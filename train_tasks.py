@@ -11,7 +11,7 @@ import scipy.ndimage
 from skimage import img_as_ubyte
 import os
 
-from model import Model
+from maml import Model
 # from deepIQA_evaluate import IQA
 
 EPSILON = 1e-5
@@ -22,52 +22,58 @@ logging_period = 50
 patch_size = 64
 LEARNING_RATE = 0.0001
 
-def train_tasks(model, sess, trainset, save_path=None, validset=[], lam = 0, task_ind=1, c=[], merged=None, writer=None, saver=None, EPOCHES=2):
+def train_tasks(model, sess, trainsets, save_path=None, validset=[], lam = 0, task_ind=1, c=[], merged=None, writer=None, saver=None, EPOCHES=2):
 	start_time = datetime.now()
-	num_imgs = trainset.shape[0]
+	num_imgs = max([trainset.shape[0] for trainset in trainsets])
 	mod = num_imgs % model.batchsize
 	n_batches = int(num_imgs // model.batchsize)
 	print('Train images number %d, Batches: %d.\n' % (num_imgs, n_batches))
-	if mod > 0:
-		trainset = trainset[:-mod]
+	task_num = 3
 
-	model.restore(sess)
+	# model.restore(sess)
 
-	if task_ind == 1:
-		update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-		with tf.control_dependencies(update_ops):
-			model.solver = tf.train.RMSPropOptimizer(learning_rate = LEARNING_RATE, decay = 0.6,
-			                                           momentum = 0.15).minimize(model.content_loss, var_list = model.var_list)
+	# if task_ind == 1:
+	# 	update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+	# 	with tf.control_dependencies(update_ops):
+	# 		model.solver = tf.train.RMSPropOptimizer(learning_rate = LEARNING_RATE, decay = 0.6,
+	# 		                                           momentum = 0.15).minimize(model.content_loss, var_list = model.var_list)
 
-	else:
-		model.update_ewc_loss(lam = lam)
-		update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-		with tf.control_dependencies(update_ops):
-			model.solver = tf.train.RMSPropOptimizer(learning_rate = LEARNING_RATE, decay = 0.6,
-			                                         momentum = 0.15).minimize(model.ewc_loss,
+	# else:
+	# 	model.update_ewc_loss(lam = lam)
+	# 	update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+	# 	with tf.control_dependencies(update_ops):
+	# 		model.solver = tf.train.RMSPropOptimizer(learning_rate = LEARNING_RATE, decay = 0.6,
+	# 		                                         momentum = 0.15).minimize(model.ewc_loss,
+	# 		                                                                   var_list = model.var_list)
+	model.solver = tf.train.RMSPropOptimizer(learning_rate = LEARNING_RATE, decay = 0.6,
+			                                         momentum = 0.15).minimize(model.loss,
 			                                                                   var_list = model.var_list)
 
-
-	model.clip = [p.assign(tf.clip_by_value(p, -50, 50)) for p in model.var_list]
+	# model.clip = [p.assign(tf.clip_by_value(p, -50, 50)) for p in model.var_list]
 
 	initialize_uninitialized(sess)
 
 	# ** Start Training **
 	step = 0
 	for epoch in range(EPOCHES):
-		np.random.shuffle(trainset)
+		for trainset in trainsets:
+			np.random.shuffle(trainset)
+		# if mod > 0:
+		# 	trainset = trainset[:-mod]
 		# for batch in range(5):
 		for batch in range(n_batches):
 			model.step += 1
 			step += 1
 			# current_iter = step
-			s1_index = np.random.choice([0, 1], 1)
-			source1_batch = trainset[batch * model.batchsize:(batch * model.batchsize + model.batchsize), :, :, s1_index[0]]
-			source2_batch = trainset[batch * model.batchsize:(batch * model.batchsize + model.batchsize), :, :, 1 - s1_index[0]]
-			source1_batch = np.expand_dims(source1_batch, -1)
-			source2_batch = np.expand_dims(source2_batch, -1)
+			source_batch = []
+			for i in range(task_num):
+				s1_index = np.random.choice([0, 1], 1)
+				source_batch.append(trainsets[2*i][batch * model.batchsize:(batch * model.batchsize + model.batchsize), :, :, s1_index[0]])
+				source_batch.append(trainsets[2*i+1][batch * model.batchsize:(batch * model.batchsize + model.batchsize), :, :, 1 - s1_index[0]])
+				source_batch[2*i] = np.expand_dims(source_batch[2*i], -1)
+				source_batch[2*i+1] = np.expand_dims(source_batch[2*i+1], -1)
 
-			FEED_DICT= {model.SOURCE1: source1_batch, model.SOURCE2: source2_batch, model.c: c[task_ind-1]}
+			FEED_DICT= {model.SOURCE: source_batch, model.c: c}
 
 			sess.run([model.solver, model.clip], feed_dict = FEED_DICT)
 
@@ -77,21 +83,21 @@ def train_tasks(model, sess, trainset, save_path=None, validset=[], lam = 0, tas
 
 
 			## validation
-			if len(validset):
-				for i in range(len(validset)):
-					sub_validset=validset[i]
-					batch_ind = np.random.randint(int(sub_validset.shape[0]/model.batchsize))
-					s_index = np.random.choice([0, 1], 1)
-					valid_source1_batch = sub_validset[batch_ind * model.batchsize:(batch_ind * model.batchsize + model.batchsize), :, :, s_index[0]]
-					valid_source2_batch = sub_validset[batch_ind * model.batchsize:(batch_ind * model.batchsize + model.batchsize), :, :, 1 - s_index[0]]
-					valid_source1_batch = np.expand_dims(valid_source1_batch, -1)
-					valid_source2_batch = np.expand_dims(valid_source2_batch, -1)
+			# if len(validset):
+			# 	for i in range(len(validset)):
+			# 		sub_validset=validset[i]
+			# 		batch_ind = np.random.randint(int(sub_validset.shape[0]/model.batchsize))
+			# 		s_index = np.random.choice([0, 1], 1)
+			# 		valid_source1_batch = sub_validset[batch_ind * model.batchsize:(batch_ind * model.batchsize + model.batchsize), :, :, s_index[0]]
+			# 		valid_source2_batch = sub_validset[batch_ind * model.batchsize:(batch_ind * model.batchsize + model.batchsize), :, :, 1 - s_index[0]]
+			# 		valid_source1_batch = np.expand_dims(valid_source1_batch, -1)
+			# 		valid_source2_batch = np.expand_dims(valid_source2_batch, -1)
 
 
-					valid_FEED_DICT = {model.SOURCE1: valid_source1_batch, model.SOURCE2: valid_source2_batch, model.c:c[i]}
-					valid_result = sess.run(merged, feed_dict = valid_FEED_DICT)
-					writer[i].add_summary(valid_result, model.step)
-					writer[i].flush()
+			# 		valid_FEED_DICT = {model.SOURCE1: valid_source1_batch, model.SOURCE2: valid_source2_batch, model.c:c[i]}
+			# 		valid_result = sess.run(merged, feed_dict = valid_FEED_DICT)
+			# 		writer[i].add_summary(valid_result, model.step)
+			# 		writer[i].flush()
 
 
 			is_last_step = (epoch == EPOCHES - 1) and (batch == n_batches - 1)
@@ -103,9 +109,9 @@ def train_tasks(model, sess, trainset, save_path=None, validset=[], lam = 0, tas
 					epoch + 1, EPOCHES, step % n_batches, n_batches, model.step, elapsed_time))
 				print('ssim loss: %s\n' % sloss)
 
-				if hasattr(model, "ewc_loss"):
-					add_loss = sess.run(model.Add_loss, feed_dict = FEED_DICT)
-					print("Add_loss:%s\n" % add_loss)
+				# if hasattr(model, "ewc_loss"):
+				# 	add_loss = sess.run(model.Add_loss, feed_dict = FEED_DICT)
+				# 	print("Add_loss:%s\n" % add_loss)
 
 
 			if is_last_step or step % 100 == 0:

@@ -8,13 +8,15 @@ import scipy.ndimage
 import tensorflow as tf
 
 from train_task import train_task
+from train_tasks import train_tasks
 from model import Model
+from maml import MAML
 
 # IQA_model = './IQA/models/nr_tid_weighted.model'
 
-data1_path = './vis_ir_dataset64.h5'
-data2_path = './oe_ue_Y_dataset64.h5'
-data3_path = './far_near_Y_dataset64.h5'
+data1_path = './vis_ir_dataset64.h5' 		#(4736, 2, 64, 64)
+data2_path = './oe_ue_Y_dataset64.h5' 		#(6016, 2, 64, 64)
+data3_path = './far_near_Y_dataset64.h5'	#(7680, 2, 64, 64)
 
 patch_size = 64
 LAM = 0 #80000
@@ -26,7 +28,7 @@ c = [3200, 3500, 100]
 
 def main():
 	with tf.Graph().as_default(), tf.Session() as sess:
-		model = Model(BATCH_SIZE = 18, INPUT_W = patch_size, INPUT_H = patch_size, is_training = True)
+		model = MAML(BATCH_SIZE = 5, INPUT_W = patch_size, INPUT_H = patch_size, is_training = True)
 		# for i in model.var_list:
 		# 	print(i.name)
 
@@ -39,21 +41,29 @@ def main():
 		# tf.summary.scalar('s2', tf.reduce_mean(model.s2))
 		tf.summary.scalar('ss1', model.s[0, 0])
 		tf.summary.scalar('ss2', model.s[0, 1])
-		tf.summary.image('source1', model.SOURCE1, max_outputs = 3)
-		tf.summary.image('source2', model.SOURCE2, max_outputs = 3)
+		# tf.summary.image('source1', model.SOURCE1, max_outputs = 3)
+		# tf.summary.image('source2', model.SOURCE2, max_outputs = 3)
 		tf.summary.image('fused_result', model.generated_img, max_outputs = 3)
 		merged = tf.summary.merge_all()
 
 		'''task1'''
-		print('Begin to train the network on task1...\n')
+		source_data = []
+		print('Begin to train the network on tasks...\n')
 		with tf.device('/cpu:0'):
 			source_data1 = h5py.File(data1_path, 'r')
 			source_data1 = source_data1['data'][:]
 			source_data1 = np.transpose(source_data1, (0, 3, 2, 1))
+			source_data2 = h5py.File(data2_path, 'r')
+			source_data2 = source_data2['data'][:]
+			source_data2 = np.transpose(source_data2, (0, 3, 2, 1))
+			source_data3 = h5py.File(data3_path, 'r')
+			source_data3 = source_data3['data'][:]
+			source_data3 = np.transpose(source_data3, (0, 3, 2, 1))
+			source_data.append([source_data1, source_data2, source_data3])
 			print("source_data1 shape:", source_data1.shape)
 		writer1 = tf.summary.FileWriter("logs/lam" + LAM_str + "/plot_1", sess.graph)
-		train_task(model = model, sess = sess, merged = merged, writer = [writer1], saver = saver, c=c,
-		           trainset = source_data1, save_path = './models/lam' + LAM_str + '/task1/', lam = LAM, task_ind = 1,
+		train_tasks(model = model, sess = sess, merged = merged, writer = [writer1], saver = saver, c=c,
+		           trainset = source_data, save_path = './models/lam' + LAM_str + '/task1/', lam = LAM, task_ind = 1,
 		           EPOCHES = EPOCHES[0])
 
 

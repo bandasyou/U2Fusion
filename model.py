@@ -138,28 +138,28 @@ class Model(object):
 
 
 
-	def star(self):
-		# used for saving optimal weights after most recent task training
-		self.star_vars = []
-		for v in range(len(self.var_list)):
-			self.star_vars.append(self.var_list[v].eval())
+	# def star(self):
+	# 	# used for saving optimal weights after most recent task training
+	# 	self.star_vars = []
+	# 	for v in range(len(self.var_list)):
+	# 		self.star_vars.append(self.var_list[v].eval())
 
-	def restore(self, sess):
-		# reassign optimal weights for latest task
-		if hasattr(self, "star_vars"):
-			for v in range(len(self.var_list)):
-				sess.run(self.var_list[v].assign(self.star_vars[v]))
+	# def restore(self, sess):
+	# 	# reassign optimal weights for latest task
+	# 	if hasattr(self, "star_vars"):
+	# 		for v in range(len(self.var_list)):
+	# 			sess.run(self.var_list[v].assign(self.star_vars[v]))
 
-	def update_ewc_loss(self, lam):
-		# elastic weight consolidation
-		# lam is weighting for previous task(s) constraints
-		if not hasattr(self, "ewc_loss"):
-			self.ewc_loss = self.content_loss
+	# def update_ewc_loss(self, lam):
+	# 	# elastic weight consolidation
+	# 	# lam is weighting for previous task(s) constraints
+	# 	if not hasattr(self, "ewc_loss"):
+	# 		self.ewc_loss = self.content_loss
 
-		for v in range(len(self.var_list)):
-			self.Add_loss += tf.reduce_sum(
-				tf.multiply(self.F_accum[v].astype(np.float32), tf.square(self.var_list[v] - self.star_vars[v])))
-			self.ewc_loss += (lam / 2) * self.Add_loss
+	# 	for v in range(len(self.var_list)):
+	# 		self.Add_loss += tf.reduce_sum(
+	# 			tf.multiply(self.F_accum[v].astype(np.float32), tf.square(self.var_list[v] - self.star_vars[v])))
+	# 		self.ewc_loss += (lam / 2) * self.Add_loss
 
 
 

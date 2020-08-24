@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow.python import pywrap_tensorflow
 import numpy as np
-
+from collections import OrderedDict
 
 WEIGHT_INIT_STDDEV = 0.05
 
@@ -14,11 +14,18 @@ class Generator(object):
 		self.decoder = Decoder(sco)
 		self.var_list = []
 		self.features = []
+		self.weights = []
+		self.weights.extend(self.encoder.weight_vars)
+		self.weights.extend(self.decoder.weight_vars)
+		self.var_list.extend(self.encoder.var_list)
+		self.var_list.extend(self.decoder.var_list)
 
-	def transform(self, I1, I2, is_training, reuse):
+	def transform(self, I1, I2, is_training, reuse, var_list = None):
+		if var_list == None:
+			var_list = self.var_list
 		img = tf.concat([I1, I2], 3)
-		code = self.encoder.encode(img, is_training, reuse)
-		generated_img = self.decoder.decode(code, is_training, reuse)
+		code = self.encoder.encode(img, is_training, reuse, var_list[:12])
+		generated_img = self.decoder.decode(code, is_training, reuse, var_list[12:])
 		# self.var_list.extend(self.encoder.var_list)
 		# self.var_list.extend(self.decoder.var_list)
 		# self.var_list.extend(tf.trainable_variables())
@@ -30,17 +37,18 @@ class Encoder(object):
 		self.scope = scope_name
 		self.var_list = []
 		self.weight_vars = []
+		self.weights = OrderedDict()
 
 		with tf.variable_scope(self.scope):
 			with tf.variable_scope('encoder'):
-				self.weight_vars.append(self._create_variables(2, n, 3, scope = 'conv1_1'))
-				self.weight_vars.append(self._create_variables(n, n, 3, scope = 'dense_block_conv1'))
-				self.weight_vars.append(self._create_variables(n*2, n, 3, scope = 'dense_block_conv2'))
-				self.weight_vars.append(self._create_variables(n*3, n, 3, scope = 'dense_block_conv3'))
-				self.weight_vars.append(self._create_variables(n*4, n, 3, scope = 'dense_block_conv4'))
-				self.weight_vars.append(self._create_variables(n * 5, n, 3, scope = 'dense_block_conv5'))
+				self.weight_vars.append(self._create_variables(2, n, 3, scope = 'conv1_1', id_ = '1'))
+				self.weight_vars.append(self._create_variables(n, n, 3, scope = 'dense_block_conv1', id_ = '2'))
+				self.weight_vars.append(self._create_variables(n*2, n, 3, scope = 'dense_block_conv2', id_ = '3'))
+				self.weight_vars.append(self._create_variables(n*3, n, 3, scope = 'dense_block_conv3', id_ = '4'))
+				self.weight_vars.append(self._create_variables(n*4, n, 3, scope = 'dense_block_conv4', id_ = '5'))
+				self.weight_vars.append(self._create_variables(n * 5, n, 3, scope = 'dense_block_conv5', id_ = '6'))
 
-	def _create_variables(self, input_filters, output_filters, kernel_size, scope):
+	def _create_variables(self, input_filters, output_filters, kernel_size, scope,id_ = '1'):
 		shape = [kernel_size, kernel_size, input_filters, output_filters]
 		with tf.variable_scope(scope):
 			kernel = tf.Variable(tf.truncated_normal(shape, stddev = WEIGHT_INIT_STDDEV),
@@ -48,18 +56,22 @@ class Encoder(object):
 			bias = tf.Variable(tf.zeros([output_filters]), name = 'bias')
 			self.var_list.append(kernel)
 			self.var_list.append(bias)
+			self.weights['conv'+id_] = kernel
+			self.weights['b'+id_] = bias
 		return (kernel, bias)
 
-	def encode(self, image, is_training, reuse):
+	def encode(self, image, is_training, reuse, var_list):
 		dense_indices = [1, 2, 3, 4, 5]
 		out = image
 		for i in range(len(self.weight_vars)):
-			kernel, bias = self.weight_vars[i]
+			# kernel, bias = var_list[2*i] var_list[2*i+1]
 			if i in dense_indices:
-				out = conv2d(out, kernel, bias, dense = True, use_lrelu = True, is_training = is_training, reuse = reuse,
+				out = conv2d(out, var_list[2*i], var_list[2*i+1], 
+					dense = True, use_lrelu = True, is_training = is_training, reuse = reuse,
 				             Scope = self.scope + '/encoder/b' + str(i))
 			else:
-				out = conv2d(out, kernel, bias, dense = False, use_lrelu = True, is_training = is_training,
+				out = conv2d(out, var_list[2*i], var_list[2*i+1], 
+					dense = False, use_lrelu = True, is_training = is_training,
 				             reuse = reuse, Scope = self.scope + '/encoder/b' + str(i))
 		return out
 
@@ -69,35 +81,38 @@ class Decoder(object):
 		self.weight_vars = []
 		self.var_list = []
 		self.scope = scope_name
+		self.weights = OrderedDict()
 		with tf.name_scope(scope_name):
 			with tf.variable_scope('decoder'):
-				self.weight_vars.append(self._create_variables(n*6, 128, 3, scope = 'conv2_1'))
-				self.weight_vars.append(self._create_variables(128, 64, 3, scope = 'conv2_2'))
-				self.weight_vars.append(self._create_variables(64, 32, 3, scope = 'conv2_3'))
-				self.weight_vars.append(self._create_variables(32, 1, 3, scope = 'conv2_4'))
+				self.weight_vars.append(self._create_variables(n*6, 128, 3, scope = 'conv2_1', id_='7'))
+				self.weight_vars.append(self._create_variables(128, 64, 3, scope = 'conv2_2', id_='8'))
+				self.weight_vars.append(self._create_variables(64, 32, 3, scope = 'conv2_3', id_='9'))
+				self.weight_vars.append(self._create_variables(32, 1, 3, scope = 'conv2_4', id_='10'))
 				# self.weight_vars.append(self._create_variables(32, 1, 3, scope = 'conv2_4'))
 
-	def _create_variables(self, input_filters, output_filters, kernel_size, scope):
+	def _create_variables(self, input_filters, output_filters, kernel_size, scope, id_):
 		with tf.variable_scope(scope):
 			shape = [kernel_size, kernel_size, input_filters, output_filters]
 			kernel = tf.Variable(tf.truncated_normal(shape, stddev = WEIGHT_INIT_STDDEV), name = 'kernel')
 			bias = tf.Variable(tf.zeros([output_filters]), name = 'bias')
 			self.var_list.append(kernel)
 			self.var_list.append(bias)
+			self.weights['conv'+id_] = kernel
+			self.weights['b'+id_] = bias
 		return (kernel, bias)
 
-	def decode(self, image, is_training, reuse):
+	def decode(self, image, is_training, reuse, var_list):
 		final_layer_idx = len(self.weight_vars) - 1
 
 		out = image
 		for i in range(len(self.weight_vars)):
-			kernel, bias = self.weight_vars[i]
+			kernel, bias = weight_vars[i]
 			if i == final_layer_idx:
-				out = conv2d(out, kernel, bias, dense = False, use_lrelu = False,
+				out = conv2d(out, var_list[2*i], var_list[2*i+1], dense = False, use_lrelu = False,
 				             Scope = self.scope + '/decoder/b' + str(i),  is_training = is_training, reuse=reuse)
 				out = tf.nn.tanh(out) / 2 + 0.5
 			else:
-				out = conv2d(out, kernel, bias, dense = False, use_lrelu = True,
+				out = conv2d(out, var_list[2*i], var_list[2*i+1], dense = False, use_lrelu = True,
 				             Scope = self.scope + '/decoder/b' + str(i), is_training = is_training, reuse=reuse)
 		return out
 
@@ -163,3 +178,6 @@ def conv2d(x, kernel, bias, use_lrelu = True, dense = False, Scope = None, strid
 	if dense:
 		out = tf.concat([out, x], 3)
 	return out
+
+def merge(dict1, dict2):
+	return dict(dict1, **dict2)
